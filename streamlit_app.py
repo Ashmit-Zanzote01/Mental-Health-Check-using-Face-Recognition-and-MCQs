@@ -2,19 +2,15 @@ import streamlit as st
 import numpy as np
 import tensorflow as tf
 import cv2
-import os
-from matplotlib import pyplot as plt
 from datetime import datetime
+from matplotlib import pyplot as plt
 
-# Path to save captured images (where Flask was saving)
-SAVE_PATH = r"D:\Python\Health_AI\static\temp_images"
+# Load the pre-trained model
+@st.cache_resource
+def load_prediction_model():
+    return tf.keras.models.load_model('best_emotion_model.keras')  # Ensure this model is in your GitHub repo
 
-# Ensure the folder exists
-if not os.path.exists(SAVE_PATH):
-    os.makedirs(SAVE_PATH)
-
-# Load the pre-trained model (ensure it's trained on RGB (48, 48, 3) images)
-model = tf.keras.models.load_model(r"D:\Python\Health_AI\training_2\best_emotion_model.keras")
+model = load_prediction_model()
 
 # Define your MCQs and capture responses
 mcq_questions = [
@@ -39,77 +35,63 @@ st.markdown("<p style='text-align: center;'>Please answer the following question
 
 # MCQ questions loop
 for i, question in enumerate(mcq_questions):
-    responses[question] = st.radio(f"<b>{i+1}. {question}</b>", ("Yes", "No", "Sometimes"), key=f"q_{i}")
+    responses[question] = st.radio(f"<b>{i + 1}. {question}</b>", ("Yes", "No", "Sometimes"), key=f"q_{i}")
 
 # Placeholder for image capture
 captured_images = []
 
-# Function to save captured image in RGB format
-def save_image(image_data, question_number):
-    # Save the image in the specified folder with a timestamp
-    filename = f"captured_image_q{question_number}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-    image_path = os.path.join(SAVE_PATH, filename)
-    
-    # Convert image to RGB (since model was trained on RGB) and save
-    image_rgb = cv2.cvtColor(image_data, cv2.COLOR_BGR2RGB)
-    resized_image = cv2.resize(image_rgb, (48, 48))  # Resize to (48, 48)
-    cv2.imwrite(image_path, resized_image)
-    
-    return image_path
+# Function to preprocess the captured image for prediction
+def preprocess_image(image):
+    # Resize and normalize the image
+    image = cv2.resize(image, (48, 48))  # Resize to (48, 48)
+    image = image.astype("float32") / 255  # Normalize
+    return np.expand_dims(image, axis=0)  # Expand to batch size
 
-# Real-time image capture logic using webcam (OpenCV)
+# Real-time image capture logic using webcam
 def capture_image():
-    cam = cv2.VideoCapture(0)  # 0 is typically the default camera
-    ret, frame = cam.read()
-    if ret:
-        st.image(frame, channels="BGR")  # Display the captured image in the app
-        return frame
-    else:
-        st.error("Failed to capture image.")
-        return None
+    # Capture image from webcam
+    img_file_buffer = st.camera_input("Capture your emotion")
+    if img_file_buffer is not None:
+        # Decode the image buffer into a BGR format image
+        image = cv2.imdecode(np.frombuffer(img_file_buffer.read(), np.uint8), cv2.IMREAD_COLOR)
+        # Convert BGR to RGB
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        return image
+    return None
 
 # Image capture at the 1st, 5th, and 10th questions
 if st.button("Capture Image (1st Question)"):
     frame = capture_image()
     if frame is not None:
-        image_path = save_image(frame, 1)
-        st.write(f"Image captured at 1st question and saved to {image_path}")
-        captured_images.append(image_path)
+        st.image(frame, channels="RGB")  # Display the captured image in the app
+        captured_images.append(preprocess_image(frame))  # Preprocess and save the image
 
 if st.button("Capture Image (5th Question)"):
     frame = capture_image()
     if frame is not None:
-        image_path = save_image(frame, 5)
-        st.write(f"Image captured at 5th question and saved to {image_path}")
-        captured_images.append(image_path)
+        st.image(frame, channels="RGB")
+        captured_images.append(preprocess_image(frame))
 
 if st.button("Capture Image (10th Question)"):
     frame = capture_image()
     if frame is not None:
-        image_path = save_image(frame, 10)
-        st.write(f"Image captured at 10th question and saved to {image_path}")
-        captured_images.append(image_path)
+        st.image(frame, channels="RGB")
+        captured_images.append(preprocess_image(frame))
 
-# Predict emotion from images (RGB, 48x48, model input size)
-def predict_emotion(image_path, model):
-    img = cv2.imread(image_path)
-    img = cv2.resize(img, (48, 48))  # Resize to the model input size
-    img = img.astype("float32") / 255  # Normalize
-    img = np.expand_dims(img, axis=0)  # Expand to batch size
-    
-    predictions = model.predict(img)[0]
+# Predict emotion from images
+def predict_emotion(image):
+    predictions = model.predict(image)[0]
     emotion_labels = ["Angry", "Disgust", "Fear", "Happy", "Sad", "Surprise", "Neutral"]
     predicted_emotion = emotion_labels[np.argmax(predictions)]
-    
     return predicted_emotion, predictions
 
 # Predict final emotion based on three images
-def predict_final_emotion(image_paths, model):
+def predict_final_emotion(images):
     emotions = []
     predictions_list = []
 
-    for image_path in image_paths:
-        emotion, predictions = predict_emotion(image_path, model)
+    for image in images:
+        emotion, predictions = predict_emotion(image)
         emotions.append(emotion)
         predictions_list.append(predictions)
 
@@ -154,7 +136,7 @@ if st.button("Submit and Get Final Assessment"):
 
     # Ensure all images are captured
     if len(captured_images) == 3:
-        final_emotion, emotion_confidences = predict_final_emotion(captured_images, model)
+        final_emotion, emotion_confidences = predict_final_emotion(captured_images)
         final_assessment = combine_assessments(final_emotion, mental_state)
         st.subheader("Final Assessment")
         st.write(final_assessment)
