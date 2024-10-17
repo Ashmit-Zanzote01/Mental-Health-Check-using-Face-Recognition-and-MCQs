@@ -11,10 +11,6 @@ def load_prediction_model():
 
 model = load_prediction_model()
 
-# Initialize session state for capturing image
-if 'captured_image' not in st.session_state:
-    st.session_state.captured_image = None
-
 # Function to predict emotion from an image
 def predict_emotion(image):
     if model is None:
@@ -56,19 +52,22 @@ st.markdown("<p style='text-align: center;'>Please answer the following question
 for i, item in enumerate(mcq_questions):
     responses[item["question"]] = st.radio(f"<b>{i + 1}. {item['question']}</b>", item["options"], key=f"q_{i}")
 
+# Check if the captured image is stored in the session state
+if 'captured_image' not in st.session_state:
+    st.session_state.captured_image = None
+
 # Real-time image capture logic using webcam
 def capture_image():
     img_file_buffer = st.camera_input("Capture your emotion at the end")
     if img_file_buffer is not None:
         # Decode the image buffer into an RGB format image
         image = cv2.imdecode(np.frombuffer(img_file_buffer.read(), np.uint8), cv2.IMREAD_COLOR)
-        st.session_state.captured_image = image  # Store in session state
         return image
     return None
 
 # Capture the image after answering all questions
 if st.button("Capture Final Image"):
-    capture_image()
+    st.session_state.captured_image = capture_image()  # Store the captured image in session state
     if st.session_state.captured_image is not None:
         st.image(st.session_state.captured_image, channels="RGB")  # Display the captured image in the app
 
@@ -81,6 +80,28 @@ def assess_mental_state(responses):
         return "You might have some emotional challenges. Consider reaching out for support."
     else:
         return "You seem to be in a good mental state! Keep up the positive mindset."
+
+# Combine the final MCQ and emotion results
+if st.button("Submit and Get Final Assessment"):
+    mental_state = assess_mental_state(responses)
+
+    # Ensure an image is captured
+    if st.session_state.captured_image is not None:
+        predicted_emotion, emotion_confidences = predict_emotion(st.session_state.captured_image)
+        
+        final_assessment = combine_assessments(predicted_emotion, mental_state)
+        
+        st.subheader("Final Assessment")
+        st.write(final_assessment)
+
+        # Display emotion confidence levels as a bar chart
+        st.subheader("Emotion Confidence Levels")
+        emotion_labels = ["Angry", "Disgust", "Fear", "Happy", "Sad", "Surprise", "Neutral"]
+        fig, ax = plt.subplots()
+        ax.bar(emotion_labels, emotion_confidences)
+        st.pyplot(fig)
+    else:
+        st.error("Please capture your emotion image at the end.")
 
 # Function to combine assessments
 def combine_assessments(predicted_emotion, mental_state):
@@ -104,25 +125,3 @@ def combine_assessments(predicted_emotion, mental_state):
         final_assessment = f"You seem to be in a good mental state, and your emotion is {predicted_emotion}. Keep up the positive mindset!"
 
     return final_assessment
-
-# Combine the final MCQ and emotion results
-if st.button("Submit and Get Final Assessment"):
-    mental_state = assess_mental_state(responses)
-
-    # Ensure an image is captured
-    if st.session_state.captured_image is not None:
-        predicted_emotion, emotion_confidences = predict_emotion(st.session_state.captured_image)
-        
-        final_assessment = combine_assessments(predicted_emotion, mental_state)
-        
-        st.subheader("Final Assessment")
-        st.write(final_assessment)
-
-        # Display emotion confidence levels as a bar chart
-        st.subheader("Emotion Confidence Levels")
-        emotion_labels = ["Angry", "Disgust", "Fear", "Happy", "Sad", "Surprise", "Neutral"]
-        fig, ax = plt.subplots()
-        ax.bar(emotion_labels, emotion_confidences)
-        st.pyplot(fig)
-    else:
-        st.error("Please capture your emotion image at the end.")
